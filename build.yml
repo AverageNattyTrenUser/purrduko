@@ -1,0 +1,193 @@
+name: Build Purrdoku app
+
+# Builds the Android app (APK) every time a file changes, or by hand from the Actions tab.
+# The finished APK appears under "Releases" on the repository's main page.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android app (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the game file
+        run: |
+          GAME=$(ls index.html 2>/dev/null || ls *.html | head -1)
+          echo "Using $GAME"
+          mkdir -p "$RUNNER_TEMP/app/www"
+          cp "$GAME" "$RUNNER_TEMP/app/www/index.html"
+
+      - name: Signing key (made once, then reused so updates install over the old app)
+        run: |
+          if [ ! -f android-signing/purrdoku.keystore.b64 ]; then
+            mkdir -p android-signing
+            keytool -genkeypair -keystore "$RUNNER_TEMP/new.jks" -storetype PKCS12 -alias purrdoku \
+              -keyalg RSA -keysize 2048 -validity 20000 -storepass purrdoku-key -keypass purrdoku-key \
+              -dname "CN=Purrdoku, C=ZA"
+            base64 -w 76 "$RUNNER_TEMP/new.jks" > android-signing/purrdoku.keystore.b64
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android-signing/purrdoku.keystore.b64
+            git commit -m "Save app signing key [skip ci]"
+            git push
+          fi
+          base64 -d android-signing/purrdoku.keystore.b64 > "$RUNNER_TEMP/purrdoku.jks"
+
+      - name: Write build files
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          cat > package.json <<'PURR_EOF'
+          {
+            "name": "purrdoku",
+            "version": "1.0.0",
+            "private": true,
+            "description": "Purrdoku – a cosy offline cat logic puzzle, packaged as an Android app with Capacitor.",
+            "type": "module",
+            "dependencies": {
+              "@capacitor/android": "7.6.10",
+              "@capacitor/cli": "7.6.10",
+              "@capacitor/core": "7.6.10",
+              "sharp": "^0.34.0"
+            }
+          }
+          PURR_EOF
+          cat > capacitor.config.json <<'PURR_EOF'
+          {
+            "appId": "com.averagenattytrenuser.purrdoku",
+            "appName": "Purrdoku",
+            "webDir": "www",
+            "android": {
+              "backgroundColor": "#1d1b33",
+              "adjustMarginsForEdgeToEdge": "force"
+            }
+          }
+          PURR_EOF
+          cat > icon-art.svg <<'PURR_EOF'
+          <!-- Purrdoku icon artwork in a 512x512 space (no background). Used by scripts/make-icons.mjs -->
+          <g transform="translate(116 124)" opacity=".95">
+            <rect x="0" y="0" width="92" height="92" rx="14" fill="#f7a8b8"/><rect x="96" y="0" width="92" height="92" rx="14" fill="#8fd3c7"/><rect x="192" y="0" width="92" height="92" rx="14" fill="#8fd3c7"/>
+            <rect x="0" y="96" width="92" height="92" rx="14" fill="#f8d77a"/><rect x="96" y="96" width="92" height="92" rx="14" fill="#9bbcf0"/><rect x="192" y="96" width="92" height="92" rx="14" fill="#c7a6e6"/>
+            <rect x="0" y="192" width="92" height="92" rx="14" fill="#f8d77a"/><rect x="96" y="192" width="92" height="92" rx="14" fill="#9bbcf0"/><rect x="192" y="192" width="92" height="92" rx="14" fill="#c7a6e6"/>
+          </g>
+          <g transform="translate(136 150) scale(3.75)">
+            <path d="M9 30 L10 5 L29 17 Z" fill="#f29c4a" stroke="#2b2330" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="M55 30 L54 5 L35 17 Z" fill="#f29c4a" stroke="#2b2330" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="M13 24 L14 12 L23 18 Z" fill="#f9c0a8"/><path d="M51 24 L50 12 L41 18 Z" fill="#f9c0a8"/>
+            <ellipse cx="32" cy="38" rx="25" ry="21" fill="#f29c4a" stroke="#2b2330" stroke-width="1.6"/>
+            <g stroke="#c8661c" stroke-width="2.6" stroke-linecap="round"><path d="M32 18.5 V25"/><path d="M25 20 L26.6 25.5"/><path d="M39 20 L37.4 25.5"/><path d="M8 35 L13 36.5"/><path d="M56 35 L51 36.5"/></g>
+            <ellipse cx="14.5" cy="44" rx="4" ry="2.4" fill="#ff8fb1" opacity=".6"/><ellipse cx="49.5" cy="44" rx="4" ry="2.4" fill="#ff8fb1" opacity=".6"/>
+            <circle cx="22" cy="35.5" r="6" fill="#6fcf6a"/><circle cx="22" cy="36" r="4.4" fill="#2b2330"/><circle cx="23.8" cy="33.6" r="1.7" fill="#fff"/>
+            <circle cx="42" cy="35.5" r="6" fill="#6fcf6a"/><circle cx="42" cy="36" r="4.4" fill="#2b2330"/><circle cx="43.8" cy="33.6" r="1.7" fill="#fff"/>
+            <path d="M29 43 L35 43 L32 46.5 Z" fill="#f08aa6"/>
+            <path d="M32 46.5 Q32 50.5 27.5 50.5 M32 46.5 Q32 50.5 36.5 50.5" fill="none" stroke="#5a2e10" stroke-width="1.6" stroke-linecap="round"/>
+            <g transform="translate(46 15) rotate(18)"><path d="M0 0 L-8 -5 L-8 5 Z" fill="#ff5d8f" stroke="#2b2330" stroke-width="1.2" stroke-linejoin="round"/><path d="M0 0 L8 -5 L8 5 Z" fill="#ff5d8f" stroke="#2b2330" stroke-width="1.2" stroke-linejoin="round"/><circle r="2.4" fill="#ff5d8f" stroke="#2b2330" stroke-width="1.2"/></g>
+          </g>
+          PURR_EOF
+          cat > make-icons.mjs <<'PURR_EOF'
+          // Renders every icon and splash image from icon-art.svg.
+          // - If ./site exists: web/PWA icons into site/icons
+          // - If ./android exists: launcher icons, adaptive icon layers and splash screens
+          import sharp from 'sharp';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const BG = '#1d1b33';
+          const ART = fs.readFileSync('icon-art.svg', 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+          const BACKDROP = `<defs><radialGradient id="g" cx="50%" cy="20%" r="85%"><stop offset="0" stop-color="#4a418a"/><stop offset="1" stop-color="${BG}"/></radialGradient></defs><rect width="512" height="512" fill="url(#g)"/>`;
+          const FULL = BACKDROP + ART;
+          // adaptive-icon foreground: art shrunk into the launcher's safe zone, transparent around it
+          const FOREGROUND = `<g transform="translate(256 256) scale(0.88) translate(-258 -266)">${ART}</g>`;
+          const ROUND = `<clipPath id="c"><circle cx="256" cy="256" r="256"/></clipPath><g clip-path="url(#c)">${FULL}</g>`;
+
+          const svg = (size, inner) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="${size}" height="${size}">${inner}</svg>`);
+          async function png(inner, size, out) {
+            fs.mkdirSync(path.dirname(out), { recursive: true });
+            await sharp(svg(size, inner)).png().toFile(out);
+            console.log('wrote', out, `${size}x${size}`);
+          }
+
+          if (fs.existsSync('site')) {
+            await png(FULL, 512, 'site/icons/icon-512.png');
+            await png(FULL, 192, 'site/icons/icon-192.png');
+            await png(FULL, 180, 'site/icons/apple-touch-icon.png');
+            await png(FULL, 64, 'site/icons/favicon-64.png');
+          }
+
+          if (fs.existsSync('android')) {
+            const res = 'android/app/src/main/res';
+            const dens = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 };
+            for (const [d, m] of Object.entries(dens)) {
+              await png(FULL, Math.round(48 * m), `${res}/mipmap-${d}/ic_launcher.png`);
+              await png(ROUND, Math.round(48 * m), `${res}/mipmap-${d}/ic_launcher_round.png`);
+              await png(FOREGROUND, Math.round(108 * m), `${res}/mipmap-${d}/ic_launcher_foreground.png`);
+            }
+            fs.writeFileSync(`${res}/values/ic_launcher_background.xml`,
+              `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${BG}</color>\n</resources>\n`);
+            // splash screens: dark background with the icon art in the middle
+            for (const dir of fs.readdirSync(res).filter(d => d.startsWith('drawable'))) {
+              const file = `${res}/${dir}/splash.png`;
+              if (!fs.existsSync(file)) continue;
+              const { width, height } = await sharp(file).metadata();
+              const size = Math.round(Math.min(width, height) * 0.6);
+              const art = await sharp(svg(size, FOREGROUND)).png().toBuffer();
+              await sharp({ create: { width, height, channels: 4, background: BG } })
+                .composite([{ input: art, gravity: 'center' }]).png().toFile(file + '.tmp');
+              fs.renameSync(file + '.tmp', file);
+              console.log('wrote', file, `${width}x${height}`);
+            }
+          }
+          PURR_EOF
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Create the Android project
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          npm install --no-audit --no-fund
+          npx cap add android
+          node make-icons.mjs
+          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.0.${{ github.run_number }}"/' android/app/build.gradle
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#&\n    <uses-permission android:name="android.permission.VIBRATE" />#' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+
+      - name: Build the APK
+        working-directory: ${{ runner.temp }}/app/android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Sign the APK
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -f -p 4 "$RUNNER_TEMP/app/android/app/build/outputs/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/purrdoku.jks" --ks-key-alias purrdoku \
+            --ks-pass pass:purrdoku-key --key-pass pass:purrdoku-key --out purrdoku.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify purrdoku.apk
+          ls -la purrdoku.apk
+
+      - name: Publish the APK as a release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Purrdoku 1.0.${{ github.run_number }}
+          body: |
+            Tap **purrdoku.apk** below to download it, then open the file to install.
+            Newer versions install over the old one and keep your progress.
+          files: purrdoku.apk
+          make_latest: true
